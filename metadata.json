@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "organization": "NeuroForge Next",
+  "origin-date": "August 2026",
+  "last-modified": "October 2026",
+  "author": "cayopoku",
+  "abstract": "NeuroForge Next is a specialized engineering system for building premium SaaS applications with Next.js 16 (App Router first, Pages Router aware), React 19, Prisma, and TypeScript. It enforces a severity-tiered Analysis First workflow using NeuroForge memory files, server-first components with client islands at the leaves, Next.js 16's explicit caching model ('use cache', cacheLife, cacheTag, updateTag), authorization in the data access layer rather than proxy/middleware, schema-validated Server Actions that return expected errors instead of throwing them, TanStack Query and Zustand on the client, optional offline-first persistence with Dexie/IndexedDB, Strapi draft-mode integration, Laws of UX and accessibility standards, reusable shadcn/ui app wrappers, loud error surfacing with zero silent fallbacks, minimal why-only code comments, analytics that records real visitor geography, and senior SaaS engineering standards.",
+  "references": [
+    "https://nextjs.org/docs",
+    "https://react.dev/",
+    "https://react.dev/learn/you-might-not-need-an-effect",
+    "https://tanstack.com/query/latest",
+    "https://zustand.docs.pmnd.rs/",
+    "https://nuqs.dev/",
+    "https://www.prisma.io/docs",
+    "https://ui.shadcn.com/",
+    "https://react.email/",
+    "https://dexie.org/",
+    "https://docs.strapi.io/",
+    "https://lawsofux.com/",
+    "https://www.skills.sh/mattpocock/skills/handoff"
+  ]
+}
