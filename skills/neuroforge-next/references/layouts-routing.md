@@ -44,13 +44,21 @@ Plus, per segment where it earns it:
 
 ## 3. Routing rules
 
-- **`params` and `searchParams` are untrusted input** (and Promises in Next 15+). Validate before use — a `[id]/page.tsx` that passes `params.id` straight to Prisma will happily query `undefined` or a non-UUID:
+- **`params` and `searchParams` are untrusted input** (and Promises — sync access was removed in Next 16). Validate before use — a `[id]/page.tsx` that passes `params.id` straight to Prisma will happily query `undefined` or a non-UUID:
 
 ```tsx
 const ParamsSchema = z.object({ id: z.string().uuid() })
 
-export default async function OrderPage(props: PageProps<'/orders/[id]'>) {
-  const parsed = ParamsSchema.safeParse(await props.params)
+export default function OrderPage(props: PageProps<'/orders/[id]'>) {
+  return (
+    <Suspense fallback={<OrderSkeleton />}>
+      <OrderDetails params={props.params} />
+    </Suspense>
+  )
+}
+
+async function OrderDetails({ params }: { params: PageProps<'/orders/[id]'>['params'] }) {
+  const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) notFound()
   const order = await getOrderForCurrentUser(parsed.data.id)
   if (!order) notFound()
@@ -58,7 +66,9 @@ export default async function OrderPage(props: PageProps<'/orders/[id]'>) {
 }
 ```
 
-- **`notFound()` before anything streams.** Call it at the top of the page (before a Suspense boundary renders content) so the response is a real 404. A not-found decided inside a streamed boundary arrives after a 200 has been sent.
+- **With `cacheComponents`, awaiting `params`/`searchParams` (or any request-time data) directly in the page body fails the build** — *"Uncached data was accessed outside of `<Suspense>`"*. Three fixes: await them inside a child wrapped in `<Suspense>` (above), add a `loading.tsx` to the segment when the whole page depends on them, or provide `generateStaticParams` for a known, bounded set (blog posts, docs). Without `cacheComponents`, awaiting at the top of the page is fine.
+- **404 status and streaming.** A `notFound()` that runs before any HTML is sent produces a real 404 status. One that runs inside a streamed boundary (Suspense or `loading.tsx`) can't change the 200 that was already sent — Next renders the not-found UI and marks the page `noindex`. That's fine for authed pages; for public SEO pages, prefer `generateStaticParams` (or a cached lookup) so missing slugs resolve before streaming.
+- **Parallel routes need `default.tsx`** in every slot in Next 16 — the build fails without it. A `default.tsx` that returns `null` (or calls `notFound()`) restores the old behaviour.
 - Protect routes in the data layer (`auth.md`); `proxy.ts` only redirects.
 - Set the rendering strategy deliberately (`data-fetching.md` §2): marketing pages build to static shells; authed dashboards are dynamic and gain nothing from prerendering.
 - Use `<Link>` for internal navigation — `<a href>` triggers a full reload and drops client state. `<Link>` prefetches in production; set `prefetch={false}` on links to heavy, rarely-visited pages in long lists.

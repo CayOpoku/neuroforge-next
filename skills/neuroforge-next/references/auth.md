@@ -118,9 +118,10 @@ export function proxy(request: NextRequest) {
 export const config = { matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'] }
 ```
 
-- **Cookie presence, not verification.** No database lookup in the interceptor — it runs on every matched request, including prefetches.
+- **Cookie presence, not verification.** No database lookup in the interceptor — it runs on every matched request, including prefetches, and Next recommends against relying on shared modules or globals there.
+- **A matcher exclusion also skips Server Actions.** Server Actions are POSTs to the page that uses them, so a matcher that excludes a path skips every action called from it — and moving an action to another route can silently remove proxy coverage. One more reason the check lives inside the action.
 - **Validate the `redirect` param** on the login side: only same-origin relative paths, or it's an open redirect.
-- Name the export to match the file (`proxy` in `proxy.ts`). Check the installed version before renaming a `middleware.ts`.
+- **Export:** a single function, either `export function proxy` or `export default function proxy`. The `matcher` must be a constant (no variables). `proxy.ts` always runs on Node.js — setting `runtime` there throws. `middleware.ts` still works (Edge) but is deprecated; migrate with `npx @next/codemod@canary middleware-to-proxy .` — suggest it, don't run it.
 
 ---
 

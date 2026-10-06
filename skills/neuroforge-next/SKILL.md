@@ -87,6 +87,7 @@ They are fluent in Next.js, React and TypeScript. Skip the tutorial. Two sentenc
 - **Failures surface, always.** Never swallow a caught error, never default a value because a call failed, and never put a fallback string after an error utility — hard stop 7 (`references/backend-errors.md` §4).
 - **Server-first, client at the leaves.** Server Components are the default. `'use client'` only where state, effects, handlers or browser APIs are needed, pushed as far down the tree as it goes (`references/components.md`).
 - **Derive, don't sync.** Compute values during render. `useEffect` is an escape hatch for synchronising with something outside React — never for deriving state, never for fetching on mount (`references/rendering.md`).
+- **Request-time reads live inside `<Suspense>` when `cacheComponents` is on.** Awaiting `params`, `searchParams`, `cookies()`, the session, or any uncached query directly in a page body fails the build — put it in a child under `<Suspense>`, add `loading.tsx`, cache it, or use `generateStaticParams` (`references/layouts-routing.md` §3).
 - **Authorise in the data layer.** `proxy.ts` / `middleware.ts` is routing, not security. Every Server Action, Route Handler and data-access function checks the session itself (`references/auth.md`).
 - **Verify, never assume:** after a file operation, confirm the file exists with the expected content before reporting done.
 - **Zero `any`.** `unknown` + narrowing is the correct escape hatch, not `any`.
@@ -123,10 +124,10 @@ Do not run heavier machinery than the task earns.
 | Tier | Scope | Protocol |
 | :--- | :--- | :--- |
 | **0 — Execute now** | Answering a question about code; single-file edit; typo, rename, prop addition, removing a `console.log`, import fix, style tweak | No memory files, no plan, no approval. Just do it and report in one or two lines. |
-| **1 — Plan inline** | 2–4 files, no schema or architecture change (new component, new Server Action, focused refactor) | State the plan and target files **in chat** (no `neuroforge/` files). Proceed on approval. |
-| **2 — Full NeuroForge** | **No task given**; new feature; Prisma or Strapi schema change; refactor spanning >4 files; caching-model or router migration; architecture/UX/type audit; project onboarding; "is this codebase any good" | Run the full protocol in `references/workflow.md`. Announce, scan, write memory files, then wait for "Proceed". |
+| **1 — Plan inline** | 2–4 files, no schema or architecture change (new component, new Server Action, a small feature on an existing model, focused refactor) | State the plan and target files **in chat** (no `neuroforge/` files). Proceed on approval. |
+| **2 — Full NeuroForge** | **No task given**; a new feature that needs a schema change, a new domain, or more than 4 files; Prisma or Strapi schema change; refactor spanning >4 files; caching-model or router migration; architecture/UX/type audit; project onboarding; "is this codebase any good" | Run the full protocol in `references/workflow.md`. Announce, scan, write memory files, then wait for "Proceed". |
 
-**No task at all is Tier 2** — that is the audit, and it was asked for. **An unclear task is not.** If a request is genuinely ambiguous in scope, ask one line — *"just this component, or the whole flow?"* — and wait. Guessing Tier 2 on a vague sentence is how a five-minute question becomes a full audit nobody wanted.
+**No task at all is Tier 2** — that is the audit, and it was asked for. **An unclear task is not.** If a request is genuinely ambiguous in scope, ask one line — *"just this component, or the whole flow?"* — and wait. Guessing Tier 2 on a vague sentence is how a five-minute question becomes a full audit nobody wanted. **"Just build it" on a Tier 1 task is the approval** — state the plan in a line and build.
 
 When the tier is merely borderline rather than ambiguous, state the one you picked in half a line and continue. Do not ask which tier.
 

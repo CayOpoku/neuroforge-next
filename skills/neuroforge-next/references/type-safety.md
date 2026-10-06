@@ -51,7 +51,7 @@ Derive from the source of truth (`Pick`, `Omit`, `Prisma.XGetPayload<…>`) so t
 
 ## 3. Next.js-generated types
 
-Next generates route types during `next dev` / `next build` (and `next typegen` on versions that have it). Prefer them over hand-typing props:
+Next generates route types during `next dev`, `next build` and `next typegen`. Prefer them over hand-typing props:
 
 ```tsx
 // app/(app)/orders/[id]/page.tsx
@@ -61,9 +61,10 @@ export default async function OrderPage(props: PageProps<'/orders/[id]'>) {
 }
 ```
 
-- `PageProps<'/route'>`, `LayoutProps<'/route'>` and `RouteContext<'/api/route'>` are global helpers on versions that ship them — check the installed version; on older ones, type `params: Promise<{ id: string }>` by hand.
+- `PageProps<'/route'>`, `LayoutProps<'/route'>` and `RouteContext<'/api/route'>` are global — no import. If the editor says they don't exist, the types haven't been generated yet (`next typegen`, or start the dev server) or `.next/types/**/*.ts` is missing from `tsconfig.json` `include`. On Next 14 and early 15, type `params: Promise<{ id: string }>` by hand.
 - **`params` is still untrusted.** It's typed as `string`, not as a valid UUID — validate before querying (`layouts-routing.md` §3).
-- `typedRoutes: true` makes `<Link href>` and `router.push` type-checked against real routes. Recommend it for apps with many internal links.
+- `typedRoutes: true` makes `<Link href>` and `router.push` type-checked against real routes (non-literal strings need `as Route`). Recommend it for apps with many internal links.
+- `next-env.d.ts` is generated — gitignore it, never edit it; custom declarations go in their own `.d.ts` added to `include`.
 
 ---
 

@@ -15,14 +15,15 @@ import Image from 'next/image'
   width={1200}
   height={630}
   sizes="(min-width: 1024px) 1200px, 100vw"
-  preload            // LCP image only — `priority` on Next ≤15
+  loading="eager"         // LCP image only — never lazy-load the hero
+  fetchPriority="high"
 />
 ```
 
 - **Always set `width`/`height`** (or `fill` inside a sized, `relative` parent). Missing dimensions cause layout shift — a Core Web Vitals penalty and visible jank.
-- **The LCP image is preloaded and never lazy.** Everything below the fold stays on the default lazy loading. Check which prop the installed version uses (`preload` in 16, `priority` before) — don't guess.
+- **The LCP image loads eagerly with high fetch priority** (`loading="eager"` + `fetchPriority="high"`) — the Next docs' recommended default. `preload` (Next 16) inserts a `<link>` in `<head>` and is only for one unambiguous above-the-fold LCP image; never combine it with `loading` or `fetchPriority`, and never use it when different images are the LCP at different viewports. **`priority` is deprecated in Next 16** — replace it with the above when you touch the file; on Next ≤15 `priority` is still the API. Everything below the fold keeps the default lazy loading.
 - **`sizes` is mandatory with `fill` or responsive layouts.** Without it the browser downloads the largest variant on every phone.
-- Remote hosts go in `images.remotePatterns` — specific hosts, never `**`. Next 16 also restricts `images.qualities` and requires `images.localPatterns` for local images with query strings — check the config before "fixing" a blocked image with a wildcard.
+- Remote hosts go in `images.remotePatterns` — specific hosts, never `**` (`images.domains` is deprecated). Next 16 defaults: `images.qualities` is `[75]` (a `quality={90}` prop is silently coerced to 75 unless 90 is added to `qualities`), local images with query strings require `images.localPatterns`, `minimumCacheTTL` is 4 hours, and local-IP sources are blocked. Check the config before "fixing" a blocked image with a wildcard.
 - `alt` describes the content's purpose. Decorative images get `alt=""`, never a missing attribute.
 
 ---

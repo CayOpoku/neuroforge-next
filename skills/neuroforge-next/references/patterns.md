@@ -22,20 +22,23 @@ Production-shaped skeletons. Adapt names to the feature; keep files under ~200 l
 // server/db.ts
 import 'server-only'
 import { PrismaClient } from '@/generated/prisma/client'   // Prisma 7: the generator's `output` path. ≤6: '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'               // Prisma 7 requires a driver adapter (this one is Postgres)
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),   // omit on Prisma ≤6
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-    // Prisma 7 also needs a driver adapter here (e.g. new PrismaPg({ connectionString })) — check the project's setup
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 ```
 
 The `globalThis` guard stops dev HMR from opening a new connection pool on every reload. On serverless, pair it with a pooled connection string.
+
+**Prisma 7 differences, if the project is on it:** the generator is `provider = "prisma-client"` with a required `output` (import from that path, not `@prisma/client`); a driver adapter is required for every database (`@prisma/adapter-pg`, `-mysql`/`-mariadb`, `-better-sqlite3`, …); and the CLI no longer loads `.env` by itself — config lives in `prisma.config.ts`. Upgrading from 6 is a Tier 2 change (schema, imports, and deploy config move together).
 
 ---
 

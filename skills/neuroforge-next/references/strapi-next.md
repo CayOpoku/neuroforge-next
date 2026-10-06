@@ -59,21 +59,24 @@ export async function cmsGet<T>(path: string, query: Record<string, unknown> = {
 // features/cms/server/pages.ts
 import 'server-only'
 import { cacheLife, cacheTag } from 'next/cache'
+import { draftMode } from 'next/headers'
 
-export async function getPageBySlug(slug: string, locale: string, status: StrapiStatus) {
+export async function getPageBySlug(slug: string, locale: string) {
   'use cache'
-  cacheLife(status === 'draft' ? 'seconds' : 'hours')
+  cacheLife('hours')
   cacheTag('cms', `cms:page:${slug}`)
+  const { isEnabled } = await draftMode()     // readable inside 'use cache'; the only request API that is
   return cmsGet<StrapiPageResponse>('pages', {
     filters: { slug: { $eq: slug } },
-    status,
+    status: isEnabled ? 'draft' : 'published',
     locale,
     populate: PAGE_POPULATE,
   })
 }
 ```
 
-- **`status` and `locale` are arguments**, so draft and published are separate cache entries — a cached draft must never be served to the public.
+- **Draft Mode bypasses the cache by itself.** When it's on, every `'use cache'` scope re-executes per request and nothing is saved, so a draft can never land in the public cache. `draftMode().isEnabled` is readable inside the cached function; `cookies()` and `headers()` are not.
+- **`locale` is an argument**, so each locale is its own cache entry.
 - **Invalidate from a Strapi webhook** — a Route Handler (`app/api/revalidate/route.ts`) verifying a shared secret and calling `revalidateTag('cms', 'max')` (or the specific page tag). Without it, edits appear only when `cacheLife` expires, and editors report "publishing is broken".
 - On projects without `cacheComponents`, use the project's model (`fetch` with `next: { tags }`).
 
@@ -97,6 +100,7 @@ export default async function AboutPage() {
 }
 ```
 
+- `getAboutPage` is a `'use cache'` function, which is why the page can await it directly under `cacheComponents`. An uncached read here would need a `<Suspense>` boundary or `loading.tsx` (`layouts-routing.md` §3).
 - The populate map lives **next to the fetch that needs it**, not in a shared `POPULATION_MAPS` object.
 - `generateMetadata` and the page call the same function — wrap it in `React.cache` (or rely on `'use cache'`) so it runs once per request.
 - No registry, no `__component` switch. Sections are ordinary components with typed props.
@@ -199,20 +203,22 @@ Each block folder's `index.tsx` default-exports the component and re-exports `co
 
 ```tsx
 import { notFound } from 'next/navigation'
-import { draftMode } from 'next/headers'
 import { blockComponents } from '@/features/cms/registry'
-import { getPageBySlug } from '@/features/cms/server/pages'
+import { getPageBySlug, listPublishedSlugs } from '@/features/cms/server/pages'
 
-type Props = { params: Promise<{ slug?: string[] }> }
+// Known slugs prerender at build; this is also what lets the page await params without a Suspense boundary under cacheComponents.
+export async function generateStaticParams() {
+  const slugs = await listPublishedSlugs()               // cached, published only
+  return slugs.map((s) => ({ slug: s === 'homepage' ? [] : s.split('/') }))
+}
 
-export default async function CmsPage({ params }: Props) {
+export default async function CmsPage({ params }: PageProps<'/[[...slug]]'>) {
   const { slug: parts } = await params
   const slug = parts?.join('/') || 'homepage'
-  const { isEnabled } = await draftMode()
 
-  const res = await getPageBySlug(slug, 'en', isEnabled ? 'draft' : 'published')
+  const res = await getPageBySlug(slug, 'en')            // cached; Draft Mode bypasses it automatically
   const page = res.data[0]
-  if (!page) notFound()                                  // a real 404, decided before anything streams
+  if (!page) notFound()                                  // resolves before streaming, so a real 404 status
 
   return (
     <>
@@ -230,7 +236,7 @@ export default async function CmsPage({ params }: Props) {
 - **`notFound()`, never an in-page "not found" component** — that's a soft 404: the crawler gets 200 and indexes an error screen. Brand the 404 in `not-found.tsx`.
 - **CMS unreachable is thrown**, landing in `error.tsx` — not rendered as an empty page.
 - **Unknown `__component`** in production renders nothing — a missing section beats a broken-looking page. Log it server-side so monitoring catches it.
-- `generateStaticParams` can prebuild published slugs; new pages still render on demand.
+- **Why this shape works under `cacheComponents`:** `generateStaticParams` makes awaiting `params` legal without Suspense, and `getPageBySlug` is cached, so the page resolves before anything streams. Slugs published after the build still render on demand — and if a runtime branch reads request data (cookies, headers, an uncached fetch), wrap that part in `<Suspense>` or the route fails (`layouts-routing.md` §3).
 - **Never write error payloads into a cookie** or global state — that ships internal detail to the browser on every request.
 
 ---
@@ -309,8 +315,8 @@ export async function GET(request: Request) {
 
 - **The secret is server env (`PREVIEW_SECRET`), never `NEXT_PUBLIC_`**, and never compared in a Client Component — a public secret lets anyone read unpublished content.
 - **Pages ask `draftMode().isEnabled`**, nothing else. The client never decides the status.
-- **The iframe needs a cross-site cookie.** Strapi admin is a different origin, so the draft cookie must be `SameSite=None; Secure` to be sent on the framed request. Check the `__prerender_bypass` cookie's attributes in DevTools on the deployed environment; over plain `http://localhost` browsers reject `Secure` cookies, so verify preview against an HTTPS environment (`strapi-backend.md` §3 has the matching CSP concession).
-- **Pair it with an exit route** (`app/api/draft/disable/route.ts` → `(await draftMode()).disable()` + redirect) and a visible "Exit preview" banner when `isEnabled`, or editors keep seeing drafts on the public site.
+- **The iframe means a third-party cookie.** `enable()` sets the `__prerender_bypass` cookie (a new value every `next build`, so it can't be guessed). Inside the Strapi admin iframe it is a cross-site cookie: test preview on the deployed HTTPS environment. Locally over HTTP the browser must allow third-party cookies, or preview silently shows published content. If preview "doesn't work" only in the iframe, check the cookie in DevTools before touching code (`strapi-backend.md` §3 has the matching CSP side).
+- **Pair it with an exit route** (`app/api/draft/disable/route.ts` → `(await draftMode()).disable()` + redirect) and a visible "Exit preview" banner when `isEnabled`. Link to it with `<Link prefetch={false}>` — a prefetch would disable Draft Mode just by hovering. Draft Mode also ends when the browser closes.
 - **Draft reads need a token with draft permission** — keep it server-only and use it only when `isEnabled`; published reads use the read-only token.
 
 ---
@@ -346,7 +352,7 @@ export async function toMetadata(seo: StrapiSeo | null, path: string): Promise<M
 
 1. **Preview secret or a draft-scoped token in `NEXT_PUBLIC_*`**, or a client-side secret comparison — critical, it exposes unpublished content.
 2. **Any CMS fetch from a Client Component** carrying a token.
-3. **Draft and published sharing a cache entry** — `status` not part of the cached function's arguments.
+3. **Draft status decided by anything but `draftMode()`** — a query param, a client flag, or a cookie the page reads itself; or a page that disables caching by hand for previews instead of relying on Draft Mode's automatic bypass.
 4. **No revalidation webhook** — edits appear only when the cache expires.
 5. **A soft 404** — an in-page not-found component instead of `notFound()`.
 6. **A hand-maintained populate map** alongside a registry that could derive it (§5).

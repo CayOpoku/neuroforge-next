@@ -75,7 +75,7 @@ With an ESP (Resend, Postmark, Brevo), use its SDK from a server module — Rese
 // server/mailer.ts
 import 'server-only'
 import nodemailer, { type Transporter } from 'nodemailer'
-import { render } from '@react-email/render'
+import { render, toPlainText } from 'react-email'   // older setups: render from '@react-email/render'
 import type { ReactElement } from 'react'
 
 const globalForMailer = globalThis as unknown as { mailer?: Transporter }
@@ -99,8 +99,8 @@ function getTransporter(): Transporter {
 }
 
 export async function sendMail(opts: { to: string; subject: string; replyTo?: string; template: ReactElement }) {
-  const html = await render(opts.template)
-  const text = await render(opts.template, { plainText: true })
+  const html = await render(opts.template)          // async — always await it
+  const text = toPlainText(html)
   return getTransporter().sendMail({ from: process.env.SMTP_FROM, to: opts.to, replyTo: opts.replyTo, subject: opts.subject, html, text })
 }
 ```
@@ -108,7 +108,7 @@ export async function sendMail(opts: { to: string; subject: string; replyTo?: st
 - **Lazy, not module-scope** — a transporter created at import time runs during `next build`, where the env may not exist.
 - **Fail loudly on missing config** — no `|| 'smtp.gmail.com'` (`smells.md` §3).
 - **Node runtime only.** Nodemailer needs Node APIs — never call it from `proxy.ts` or an Edge route.
-- `nodemailer` and `@react-email/*` are server dependencies; suggest the installs, don't run them. Check the installed `render` signature — it is async in current versions.
+- `nodemailer` and `react-email` are server dependencies; suggest the installs, don't run them. `render()` returns a Promise — a missing `await` sends `[object Promise]` as the mail body.
 
 ### The action
 
@@ -252,7 +252,7 @@ export async function GET(_req: Request, ctx: RouteContext<'/api/invoices/[id]/p
 - **Authorise before rendering**, scoped by the session — an unscoped `findUnique(id)` is the classic document-enumeration hole.
 - **Sanitise the filename** — strip quotes, newlines and path separators, or it's header injection.
 - **`inline` vs `attachment`** — pick deliberately.
-- Some PDF libraries need `serverExternalPackages` in `next.config` to bundle correctly — check the library's Next.js notes before debugging a build error.
+- If the build or route fails with *"require() of ES Module not supported"*, add `serverExternalPackages: ['@react-pdf/renderer']` to `next.config` — a config change, so propose it rather than editing silently.
 - The link is a plain `<a href="/api/invoices/…/pdf">`. Never fetch a PDF into a Client Component just to trigger a download.
 
 **(c) HTML → PDF with a headless browser.** Puppeteer/Playwright costs ~300 MB of Chromium, seconds of cold start, and doesn't run on most serverless/edge targets. Reach for `@react-pdf/renderer` or `pdf-lib` first. If HTML-to-PDF is genuinely required, isolate it in its own service and say the trade-off out loud.

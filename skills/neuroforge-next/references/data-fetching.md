@@ -51,20 +51,23 @@ export async function getPublicPlans() {
 }
 ```
 
-- **`'use cache'`** goes at the top of an async function, a component, or a file. The cache key is built from the arguments and closed-over values — keep them **small and serialisable**, and never pass a whole request object.
-- **No request data inside a cached scope.** `cookies()`, `headers()` and `searchParams` cannot be read inside `'use cache'` — read them outside and pass the specific value in as an argument (and accept that each distinct value is its own cache entry). Per-user data is usually not a `'use cache'` candidate at all.
-- **The static shell.** With `cacheComponents`, `'use cache'` output plus `<Suspense>` fallbacks form the prerendered shell (Partial Prerendering); everything else streams. Request-time data accessed outside a `<Suspense>` boundary is a build error — wrap the dynamic subtree, don't make the whole route dynamic.
+- **`'use cache'`** goes at the top of an async function, a component, or a file (every export then becomes cached and must be async). The cache key is built from the arguments and closed-over values — keep them **small and serialisable** (no class instances, functions, or `URL` objects), and never pass a whole request object.
+- **Always call `cacheLife` explicitly** in every cached scope. Without it the `default` profile applies silently, and nesting a short-lived cache inside a scope with no explicit `cacheLife` fails the build.
+- **No request data inside a cached scope — and the rule follows the call stack.** `cookies()`, `headers()` and `searchParams` cannot be read inside `'use cache'` *or in any helper it calls*. Read them outside and pass the specific value in as an argument (each distinct value is its own cache entry). On a dynamic route this mistake can pass `next build` and only fail under `next start` — trace the helpers, don't trust a green build. Per-user data is usually not a `'use cache'` candidate at all.
+- **The static shell.** With `cacheComponents`, `'use cache'` output plus `<Suspense>` fallbacks form the prerendered shell (Partial Prerendering); everything else streams. Awaiting uncached data, `cookies()`/`headers()`, or a page's `params`/`searchParams` outside a `<Suspense>` boundary fails with *"Uncached data was accessed outside of `<Suspense>`"* — wrap the dynamic subtree (or add `loading.tsx`), don't make the whole route dynamic.
+- **Where the cache lives.** The default handler is in-memory. On a long-running server entries persist across requests; on **serverless, entries usually don't survive between requests** — `'use cache'` there mainly feeds the build-time static shell. If runtime reuse matters on serverless, `'use cache: remote'` uses a platform cache handler (a network round-trip and usually a fee). No cache entry survives a new deploy. `'use cache: private'` exists for the rare case where runtime values can't be passed as arguments — prefer refactoring.
+- **Draft Mode bypasses it automatically.** With Draft Mode on, every cached scope re-executes per request and nothing is saved — no special-casing needed (`strapi-next.md`).
 - **Old route-segment config is gone in this model.** `export const revalidate`, `export const dynamic = 'force-static'` and `fetchCache` don't apply — `'use cache'` + `cacheLife` replaces them. Flag them in an audit of a `cacheComponents` project.
-- Variants such as `'use cache: private'` / `'use cache: remote'` exist in newer releases — **verify against the installed version's docs** before recommending one.
+- **Client side:** the router keeps cached content for the profile's `stale` time, with a 30-second minimum — a just-saved change still needs `updateTag`/`refresh()` to show immediately.
 
 ### Invalidation after a write
 
 | Call | Where | Effect |
 | :--- | :--- | :--- |
 | `updateTag('orders')` | **Server Actions only** | Expires the tag and the next read waits for fresh data — **read-your-own-writes**. The user who saved sees the change. |
-| `revalidateTag('plans', 'max')` | Server Actions, Route Handlers (webhooks) | Marks the tag stale; the next visitor gets the cached value while it refreshes in the background. Next 16 expects the second `cacheLife` profile argument. |
+| `revalidateTag('plans', 'max')` | Server Actions, Route Handlers (webhooks) | Marks the tag stale; the next visitor gets the cached value while it refreshes in the background. Next 16 requires the second argument — a profile name (`'max'` recommended) or `{ expire: seconds }`; the one-argument form is deprecated. |
 | `revalidatePath('/billing')` | Server Actions, Route Handlers | Invalidates a path's cached output. Prefer tags — they follow the data, not the URL. |
-| `refresh()` | Server Actions | Refreshes the client router's view of the current page without touching tags. |
+| `refresh()` (from `next/cache`) | Server Actions only | Re-renders **uncached** data on the current page (a header count, live metrics) without touching any cache. |
 
 Rule of thumb: **a user editing their own data → `updateTag`. A CMS webhook or background job → `revalidateTag(tag, 'max')`.** Every tag you `cacheTag` must have a write that invalidates it, or it is stale data on a timer.
 
@@ -113,8 +116,9 @@ Use it once the client genuinely needs a cache: data refetched on focus or inter
 ### Setup — one client per server request, one per browser
 
 ```tsx
-// lib/query-client.ts
+// lib/query-client.ts — mirrors TanStack's official App Router setup
 import { QueryClient, defaultShouldDehydrateQuery, isServer } from '@tanstack/react-query'
+// Newest v5 releases replace `isServer` with `environmentManager.isServer()` — use whichever the installed version exports
 
 function makeQueryClient() {
   return new QueryClient({
@@ -140,6 +144,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { getQueryClient } from '@/lib/query-client'
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // getQueryClient(), not useState: React discards a useState client if something suspends with no boundary in between
   const queryClient = getQueryClient()
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }
@@ -175,7 +180,15 @@ import { HydrationBoundary, dehydrate } from '@tanstack/react-query'
 import { getQueryClient } from '@/lib/query-client'
 import { ordersListOptions } from '@/features/orders/queries'
 
-export default async function OrdersPage() {
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={<OrdersListSkeleton />}>   {/* required with cacheComponents: the prefetch is request-time data */}
+      <PrefetchedOrders />
+    </Suspense>
+  )
+}
+
+async function PrefetchedOrders() {
   const queryClient = getQueryClient()
   await queryClient.prefetchQuery(ordersListOptions(1))
   return (
@@ -185,6 +198,8 @@ export default async function OrdersPage() {
   )
 }
 ```
+
+TanStack's docs also show a streaming variant (start the query without `await`, let `pending` queries dehydrate) — use it when the shell should not wait at all.
 
 ### Two statuses, two questions
 
@@ -269,7 +284,8 @@ export function useBuilderStore<T>(selector: (s: BuilderState & BuilderActions) 
 }
 ```
 
-- **Provider per tree, not a module singleton,** whenever the store is initialised from server data or rendered during SSR. A module-level store is shared by every request on the server — one user's state can render into another user's HTML.
+- **Provider per tree, not a module singleton** — this is Zustand's official Next.js pattern. A Next.js server handles many requests at once, so a module-level store is shared between them — one user's state can render into another user's HTML.
+- **Server Components never read or write the store.** They can't use hooks or context; pass server data into the provider's `init` from a Server Component parent instead.
 - **Select narrowly** (`useBuilderStore((s) => s.step)`), never the whole store — every subscriber re-renders on every change otherwise.
 - Actions live in the store; components never `setState` it from outside.
 - **Not for server data** (§1). Not for URL state — `nuqs` owns filters and pagination.

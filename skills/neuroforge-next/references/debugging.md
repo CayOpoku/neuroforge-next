@@ -31,7 +31,7 @@ Ask for what only they can see: the exact error text, what the Network tab shows
 
 - **Lint:** the project's `lint` script (`eslint .`). `next lint` was removed in Next 16 — if the script still calls it, say so and suggest `eslint .`.
 - **Typecheck:** `npx tsc --noEmit` (or the project's `typecheck` script).
-- **Build:** `next build` catches route-level errors (dynamic data outside Suspense under `cacheComponents`, invalid exports) that `tsc` cannot — but it is slow and writes `.next/`. Ask first.
+- **Build:** `next build` catches route-level errors (dynamic data outside Suspense under `cacheComponents`, invalid exports, parallel-route slots missing `default.tsx`) that `tsc` cannot — but it is slow and writes `.next/`. Ask first. `next build --debug-prerender` gives stack traces naming the failing component.
 - **Ask before running any of them.** Say which command and why.
 - **Zero `any`:** never as an escape hatch. `unknown` and narrow — `type-safety.md`.
 
@@ -129,7 +129,9 @@ Never ignore a hydration error. It discards the server HTML for that subtree, re
 | Data is stale after a save, fine in dev | The page is prerendered or cached, and the write doesn't invalidate it | Does the action call `updateTag`/`revalidatePath` for what the page reads? |
 | `Error: Failed to find Server Action "…"` | **Version skew**: a browser loaded before the deploy is calling an action id the new build doesn't have; or instances built separately | Hard refresh fixes it for that user → skew. Fix: deploy-level skew protection (Vercel) or a consistent `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` + `deploymentId` across instances |
 | `ChunkLoadError` / "Loading chunk … failed" after a deploy | Old client requesting chunks the new deploy removed | Same page in Incognito works → stale client. Keep previous build assets available briefly, or reload on chunk error |
-| "Uncached data was accessed outside of `<Suspense>`" at build | `cacheComponents` on; a dynamic read (cookies, headers, uncached fetch) isn't inside a Suspense boundary | Wrap the dynamic subtree in `<Suspense>`, or cache the read |
+| "Uncached data was accessed outside of `<Suspense>`" | `cacheComponents` on; an uncached fetch/DB read, `cookies()`/`headers()`, or a page awaiting `params`/`searchParams` sits outside a Suspense boundary | Wrap that subtree in `<Suspense>`, add `loading.tsx`, cache the read, or add `generateStaticParams` (`layouts-routing.md` §3). Only in CI? `next build --debug-prerender` names the component |
+| Build hangs ~50 s then *"Filling a cache during prerender timed out"* | A request-time Promise (cookies, params, uncached data) passed into or captured by a `'use cache'` function | Await the value outside the cached scope and pass the plain value in |
+| Works in build, fails at runtime with a `next-request-in-use-cache` error | `cookies()`/`headers()` called inside `'use cache'` — directly or in a helper it calls | Read it outside and pass the value as an argument (`data-fetching.md` §2) |
 | An error page with only "An error occurred in the Server Components render" | An error thrown on the server; message redacted in production | Find the `digest` in the server logs |
 | A form submit does a full page navigation | `<form action={serverAction}>` before hydration — this is progressive enhancement working, not a bug | If something else breaks, check the console for the first error that stopped hydration |
 | New code has no effect | The deploy didn't run, or didn't go green | CI/deploy status for the merge commit before any code reading |
